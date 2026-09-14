@@ -45,6 +45,15 @@ void signals_setup_shell(void)
     install(SIGINT,  SIG_IGN, SA_RESTART);
     install(SIGQUIT, SIG_IGN, SA_RESTART);
     install(SIGCHLD, on_sigchld, SA_RESTART | SA_NOCLDSTOP);
+
+    // evita que la shell se pause a sí misma ante CTRL + Z
+    install(SIGTSTP, SIG_IGN, SA_RESTART); 
+
+    // evitan que la shell se congele sola cuando intente recuperar 
+    // el control de la terminal con tcsetpgrp()
+    install(SIGTTIN, SIG_IGN, SA_RESTART); 
+    install(SIGTTOU, SIG_IGN, SA_RESTART);
+
 }
 
 void signals_reset_child(void)
@@ -52,4 +61,13 @@ void signals_reset_child(void)
     install(SIGINT,  SIG_DFL, 0);
     install(SIGQUIT, SIG_DFL, 0);
     install(SIGCHLD, SIG_DFL, 0);
+
+    //hce que el proceso hijo sí responda al ctrl+z
+    install(SIGTSTP, SIG_DFL, 0); 
+    
+    //hacen que el hijo atienda las señales de pausarse si intenta
+    // leer o escribir en la terminal estando en background
+    install(SIGTTIN, SIG_DFL, 0);
+    install(SIGTTOU, SIG_DFL, 0);
+
 }

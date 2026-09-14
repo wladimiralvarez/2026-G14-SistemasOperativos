@@ -144,17 +144,21 @@ int execute_pipeline(pipeline_t *pl)
 
         if (pid == 0) {
 
-            //el hijo hereda el SIG_IGN de la shell, hay que restaurarlo antes del exec
-            signals_reset_child();
 
             //la mascara de señales tambien se hereda y sobrevive al exec
             sigprocmask(SIG_SETMASK, &prev, NULL);
 
-            //el Ctrl+C del terminal va a todo el grupo de primer plano. los de
-            //background se mudan a su propio grupo para que no los alcance, los
-            //de primer plano se quedan en el de la shell y si deben morir
-            if (pl->background)
-                setpgid(0, pgid);
+            // asignamos un grupo nuevo a todos los procesos (foreground y background)
+            if(pgid == 0)
+                pgid = getpid();
+            setpgid(0,pgid);    
+
+            //si es foreground, le entrega la terminal
+            if (!pl->background)
+                tcsetpgrp(STDIN_FILENO, pgid);
+            
+            // ahora que tiene la terminal puede ser vulnerable a SIGTTOU    
+            signals_reset_child();    
 
             //su entrada viene del pipe anterior
             if (prev_read != -1) {
@@ -194,11 +198,10 @@ int execute_pipeline(pipeline_t *pl)
         pids[i] = pid;
 
         //el mismo setpgid lo hacen padre e hijo, gana el que llegue primero.
-        if (pl->background) {
-            if (pgid == 0)
-                pgid = pid;
-            setpgid(pid, pgid);
-        }
+        if (pgid == 0)
+            pgid = pid;
+        setpgid(pid, pgid);
+
 
         //el padre no participa en la tuberia
         if (prev_read != -1)
@@ -214,8 +217,8 @@ int execute_pipeline(pipeline_t *pl)
 
     if (pl->background) {
 
-        //registramos el job con el pid del ultimo
-        int id = jobs_add(last, pl->rawline);
+        //registramos el job con el pgid debido al uso de pipes
+        int id = jobs_add(pgid, pl->rawline);
         if (id > 0)
             printf("[%d] %d\n", id, (int)last);
 
@@ -223,18 +226,34 @@ int execute_pipeline(pipeline_t *pl)
         sigprocmask(SIG_SETMASK, &prev, NULL);
         return 0;
     }
+    // el padre cede la terminal al grupo
+    tcsetpgrp(STDIN_FILENO, pgid);
 
     for (i = 0; i < pl->ncmds; i++) {
-
-        if (waitpid(pids[i], &status, 0) == -1) {
+        // usamos la flag WUNTRACED para que espere se llame a waitpid no solo cuando el hijo muera,
+        // sino tambien cuando es pausado
+        if (waitpid(pids[i], &status, WUNTRACED) == -1) {
             perror("mishell: waitpid");
             continue;
         }
+        // dado que waitpid retorna si el proceso muere o es pausado, necesitamos revisar el status
+        if (WIFSTOPPED(status)) {
+            // se registra el job en la tabla como detenido usando su pgid
+            int id = jobs_add(pgid, pl->rawline);
+            if (id > 0)
+                printf("\n[%d]+  Detenido\t%s\n", id, pl->rawline);
+            
+            // Si se detiene uno, se detiene toda la pipe
+            break;
+        }
+
 
         if (pids[i] == last)
             code = status_to_code(status);
     }
-
+    // le devolvemos el control de la terminal al padre
+    tcsetpgrp(STDIN_FILENO, getpid());
+    
     sigprocmask(SIG_SETMASK, &prev, NULL);
 
     return code;
