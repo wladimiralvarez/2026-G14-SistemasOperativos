@@ -6,13 +6,10 @@
 
 static job_t jobs[MAX_JOBS];
 
-// contador que solo aumenta
-static int next_id;
 
 void jobs_init(void)
 {
     memset(jobs, 0, sizeof(jobs));
-    next_id = 1;
 }
 
 int jobs_add(pid_t pid, const char *cmdline)
@@ -23,7 +20,7 @@ int jobs_add(pid_t pid, const char *cmdline)
         if (jobs[i].state != JOB_FREE)
             continue;
 
-        jobs[i].id     = next_id++;
+        jobs[i].id     = i+1;
         jobs[i].pid    = pid;
         jobs[i].state  = JOB_RUNNING;
         jobs[i].status = 0;
@@ -46,11 +43,25 @@ void jobs_list(void)
         if (jobs[i].state == JOB_FREE)
             continue;
 
+        const char *state_str;
+        if (jobs[i].state == JOB_RUNNING) {
+            state_str = "Ejecutando";
+        } else if (jobs[i].state == JOB_STOPPED) { 
+            state_str = "Detenido";
+        } else {
+            state_str = "Terminado";
+        }
+
         printf("[%d] %d %-12s %s\n",
                jobs[i].id,
                (int)jobs[i].pid,
-               jobs[i].state == JOB_RUNNING ? "Ejecutando" : "Terminado",
+               state_str,
                jobs[i].cmdline);
+
+        // si ya informamos al usuario que ya terminó, lo borramos
+        if (jobs[i].state == JOB_DONE) {
+            jobs[i].state = JOB_FREE;
+        }       
     }
 }
 

@@ -11,7 +11,8 @@
 typedef enum {
     JOB_FREE = 0,   // ranura vacía 
     JOB_RUNNING,    // corriendo en background 
-    JOB_DONE        // terminó
+    JOB_STOPPED,    // pausado
+    JOB_DONE,        // terminó
 } job_state_t;
 
 typedef struct {

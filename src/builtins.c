@@ -1,6 +1,6 @@
 /*
  * comandos internos: cd, exit, jobs, pmon
- * son internos porque fork crea un proceso hijo con su copia del estado incluyendo el directorio.
+ * son internos porque, si fueran externos, fork crea un proceso hijo con su copia del estado incluyendo el directorio.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@ static int builtin_cd(command_t *cmd);
 static int builtin_exit(command_t *cmd);
 static int builtin_jobs(command_t *cmd);
 static int builtin_pmon(command_t *cmd);
-
+static int builtin_bg(command_t *cmd);
 /*
  * tabla: nombre -> función. 
  * agregar un built-in nuevo es agregar una línea aqui y escribir la función.
@@ -28,6 +28,7 @@ static const struct {
     { "exit", builtin_exit },
     { "jobs", builtin_jobs },
     { "pmon", builtin_pmon },
+    { "bg",   builtin_bg   },
     { NULL,   NULL         }
 };
 
@@ -127,4 +128,32 @@ static int builtin_pmon(command_t *cmd)
     }
 
     return pmon_run(seconds);
+}
+
+// bg
+static int builtin_bg(command_t *cmd)
+{
+    if(cmd->argc != 2){
+        fprintf(stderr, "bg: solo debes ingresar el indice del job como argumento\n");
+        return 1;
+    }
+    int id = atoi(cmd->argv[1]);
+    job_t* job = jobs_get(id - 1); // id - 1 = indice
+
+    if(job == NULL){
+        fprintf(stderr, "bg: el job seleccionado no existe\n");
+        return 1;
+    }
+    // imprimimos el comando que se va a despertar
+    printf("[%d] %s &\n", id, job->cmdline);
+    // actualizamos el estado
+    job->state = JOB_RUNNING;
+    // enviamos la señal a todo el grupo de continuar
+    if(kill(-job->pid, SIGCONT)<0){ 
+        perror("mishell: kill");
+        return 1;
+    }
+    // exito
+    return 0;
+
 }

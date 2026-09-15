@@ -227,7 +227,9 @@ int execute_pipeline(pipeline_t *pl)
         return 0;
     }
     // el padre cede la terminal al grupo
-    tcsetpgrp(STDIN_FILENO, pgid);
+    if (tcsetpgrp(STDIN_FILENO, pgid) == -1) {
+        perror("mishell: error al ceder la terminal");
+    }
 
     for (i = 0; i < pl->ncmds; i++) {
         // usamos la flag WUNTRACED para que espere se llame a waitpid no solo cuando el hijo muera,
@@ -240,9 +242,15 @@ int execute_pipeline(pipeline_t *pl)
         if (WIFSTOPPED(status)) {
             // se registra el job en la tabla como detenido usando su pgid
             int id = jobs_add(pgid, pl->rawline);
-            if (id > 0)
+            if (id > 0){
+                // actualizamos el estado del job
+                job_t *job = jobs_get(id-1); //le restamos 1 al id para que sea indice de arreglo
+                if (job != NULL) {
+                    job->state = JOB_STOPPED; 
+                }
+
                 printf("\n[%d]+  Detenido\t%s\n", id, pl->rawline);
-            
+            }
             // Si se detiene uno, se detiene toda la pipe
             break;
         }
@@ -252,7 +260,9 @@ int execute_pipeline(pipeline_t *pl)
             code = status_to_code(status);
     }
     // le devolvemos el control de la terminal al padre
-    tcsetpgrp(STDIN_FILENO, getpid());
+    if (tcsetpgrp(STDIN_FILENO, getpgrp()) == -1) {
+        perror("mishell: error al recuperar la terminal");
+    }
     
     sigprocmask(SIG_SETMASK, &prev, NULL);
 
