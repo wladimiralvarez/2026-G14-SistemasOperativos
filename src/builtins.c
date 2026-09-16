@@ -6,7 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <sys/wait.h>
+#include <errno.h>
 #include "builtins.h"
 #include "jobs.h"
 #include "pmon.h"
@@ -16,6 +17,7 @@ static int builtin_exit(command_t *cmd);
 static int builtin_jobs(command_t *cmd);
 static int builtin_pmon(command_t *cmd);
 static int builtin_bg(command_t *cmd);
+static int builtin_fg(command_t *cmd);
 /*
  * tabla: nombre -> función. 
  * agregar un built-in nuevo es agregar una línea aqui y escribir la función.
@@ -29,6 +31,7 @@ static const struct {
     { "jobs", builtin_jobs },
     { "pmon", builtin_pmon },
     { "bg",   builtin_bg   },
+    { "fg",   builtin_fg},
     { NULL,   NULL         }
 };
 
@@ -140,9 +143,18 @@ static int builtin_bg(command_t *cmd)
     int id = atoi(cmd->argv[1]);
     job_t* job = jobs_get(id - 1); // id - 1 = indice
 
-    if(job == NULL){
+    if(job == NULL || job->state == JOB_FREE){
         fprintf(stderr, "bg: el job seleccionado no existe\n");
         return 1;
+    }
+
+    if(job->state == JOB_DONE){
+       fprintf(stderr, "bg: el job seleccionado ya está muerto\n");
+       return 1;  
+    }
+    if(job->state == JOB_RUNNING){
+       fprintf(stderr, "bg: el job seleccionado ya está corriendo en segundo plano\n");
+       return 1;  
     }
     // imprimimos el comando que se va a despertar
     printf("[%d] %s &\n", id, job->cmdline);
@@ -152,6 +164,76 @@ static int builtin_bg(command_t *cmd)
     if(kill(-job->pid, SIGCONT)<0){ 
         perror("mishell: kill");
         return 1;
+    }
+    // exito
+    return 0;
+
+}
+
+// fg
+static int builtin_fg(command_t *cmd)
+{
+    if(cmd->argc != 2){
+        fprintf(stderr, "fg: solo debes ingresar el indice del job como argumento\n");
+        return 1;
+    }
+    int id = atoi(cmd->argv[1]);
+    job_t* job = jobs_get(id - 1); // id - 1 = indice
+
+    if(job == NULL || job->state == JOB_FREE    ){
+        fprintf(stderr, "fg: el job seleccionado no existe\n");
+        return 1;
+    }
+
+    // le cedemos la terminal al grupo
+    tcsetpgrp(STDIN_FILENO, job->pid);
+    // si estaba pausado lo despertamos
+    if(job->state == JOB_STOPPED){
+        if(kill(-job->pid, SIGCONT) < 0){
+            perror("mishell: kill (fg)");
+        }
+        // actualizamos el estado
+        job->state = JOB_RUNNING;   
+    }
+    // imprimimos el comando que se va a traer
+    printf("%s\n", job->cmdline);
+    int status;
+    // realizamos constantemente el waitpid por si el kernel manda un SIGCHLD al
+    // cambiar un proceso hijo de estado
+    // incluso si el proceso aun no termina
+    while (1) {
+        int ret = waitpid(-job->pid, &status, WUNTRACED);
+        
+        //si waitpid falla (devuelve -1)
+        if (ret == -1) {
+            if (errno == EINTR) {
+                // El kernel interrumpe con una señal, se ignora.
+                continue;
+            } 
+            else if (errno == ECHILD) {
+                // nuestro manejador ya actualiza el estado del job, solo salimos.
+                break;
+            } 
+            else {
+                // error
+                perror("mishell: waitpid (fg)");
+                break;
+            }
+        } 
+        
+        //si waitpid tuvo exito, vemos si se trata de una pausa o si murio el proceso.
+        if (WIFSTOPPED(status)) {
+            job->state = JOB_STOPPED;
+            printf("\n[%d]+  Detenido\t%s\n", job->id, job->cmdline);
+        } else {
+            job->state = JOB_DONE; // Murió de forma natural
+        }
+        
+        break; // Salimos del bucle infinito
+    }
+    // le devolvemos la terminal a la shell
+    if (tcsetpgrp(STDIN_FILENO, getpgrp()) == -1) {
+        perror("mishell: no se pudo recuperar la terminal en fg");
     }
     // exito
     return 0;
