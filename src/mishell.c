@@ -10,6 +10,8 @@
 #include "executor.h"
 #include "signals.h"
 #include "jobs.h"
+#include "vars.h"
+#include "replace.h"
 
 // imprime el prompt
 static void print_prompt(void)
@@ -50,6 +52,11 @@ int main(void)
             printf("\n");   
             break;
         }
+
+        if (check_set(line)){  //se comprueba si hay algun seteo de variables locales en la linea leida
+            continue;
+        }
+        replace_variables(line, sizeof(line));  //se reemplazan las variables que tienen un $ al inicio por sus valores correspondientes a los mapeos disponibles
 
         parsed = parse_line(line, &pl);
 
